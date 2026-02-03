@@ -28,101 +28,126 @@ import (
 
 // -- Batch jobs metadata store --
 
-type BatchJob struct {
-	ID     string    // [mandatory, immutable, returned by get, parsed by DB, must be unique] User provided unique ID of the job. This ID must be unique.
-	SLO    time.Time // [mandatory, immutable, returned by get, parsed by DB] The time based on which the job should be prioritized relative to other jobs.
-	TTL    int       // [mandatory, immutable, not returned by get, parsed by DB] The number of seconds to set for the TTL of the DB record.
-	Tags   []string  // [optional, updatable, returned by get, parsed by DB] A list of tags that enable to select jobs based on the tags' contents. The tags must not contain ';;', which is the separator.
-	Spec   []byte    // [optional, immutable, returned optionally by get, opaque to DB] The static part of the batch job (serialized), including the job's specification.
-	Status []byte    // [optional, updatable, returned by get, opaque to DB] The dynamic part of the batch job (serialized), including its status.
+type BatchItem struct {
+	ID     string // [mandatory, immutable, returned by get, parsed by DB, must be unique] User provided unique ID of the item. This ID must be unique.
+	Expiry int64  // [optional, immutable, returned by get, parsed by DB] The unix timestamp in seconds when the item is considered expired.
+	Tags   Tags   // [optional, updatable, returned by get, parsed by DB] A list of tags that enable to select items based on the tags' contents. The tags must not contain ';;', which is the internal separator used.
+	Spec   []byte // [optional, immutable, returned optionally by get, opaque to DB] The static part of the batch item (serialized), including the item's specification.
+	Status []byte // [optional, updatable, returned by get, opaque to DB] The dynamic part of the batch item (serialized), including its status.
+	//SLO    time.Time // [mandatory, immutable, returned by get, parsed by DB] The time based on which the item should be prioritized relative to other items. TBR
 }
 
-func (bj *BatchJob) IsValid() error {
+func (bj *BatchItem) IsValid() error {
+	if len(bj.ID) == 0 {
+		return fmt.Errorf("ID is empty")
+	}
+	// if bj.SLO.IsZero() { TBR
+	// 	return fmt.Errorf("SLO is zero for ID %s", bj.ID)
+	// }
+	// if bj.TTL <= 0 {
+	// 	return fmt.Errorf("TTL is invalid for ID %s", bj.ID)
+	// }
+	return nil
+}
+
+// BatchDBClient enables to manage batch item metadata objects in persistent storage.
+type BatchDBClient interface {
+	store.BatchClientAdmin
+
+	// DBStore stores a batch item metadata object.
+	// Returns the ID of the item in the database.
+	DBStore(ctx context.Context, item *BatchItem) (ID string, err error)
+
+	// DBGet gets the information (static and dynamic) of batch items.
+	// If IDs are specified, this function will get items by the specified IDs.
+	// If tags are specified, this function will get items by the specified tags.
+	// If expired is set to true, this function will get expired items. This option can be used with tags selection.
+	// If no IDs nor tags nor expired are specified, the function will return an empty list of items.
+	// tagsLogicalCond specifies the logical condition to use for when searching for the tags per item.
+	// includeStatic specifies if to include the static part of a item in the returned output.
+	// start and limit specify the pagination details. This is relevant only for search by tags.
+	// In the first iteration with pagination specify 0 for 'start', and in any subsequent iteration specify in 'start'
+	// the value that was returned by 'cursor' in the previous iteration. The value returned by 'cursor' is an opaque integer.
+	// The value specified in 'limit' can be different between iterations, and is a recommendation only.
+	// items is a slice of returned items.
+	// cursor is an opaque integer that should be given in the next paginated call via the 'start' parameter.
+	DBGet(ctx context.Context, query *BatchDBQuery,
+		includeStatic bool, start, limit int) (
+		items []*BatchItem, cursor int, expectedMore bool, err error)
+
+	// DBUpdate updates the dynamic parts of a batch item.
+	// The function will update in the item's record in the database - all the dynamic fields of the item which are not empty
+	// in the given item object.
+	// Any dynamic field that is empty in the given item object - will not be updated in the item's record in the database.
+	DBUpdate(ctx context.Context, item *BatchItem) (err error)
+
+	// DBDelete deletes batch items.
+	DBDelete(ctx context.Context, IDs []string) (deletedIDs []string, err error)
+}
+
+type Tags map[string]string
+
+type BatchDBQuery struct {
+	IDs             []string
+	TagSelectors    Tags
+	TagsLogicalCond GenLogicalCond
+	Expired         bool
+}
+
+type GenLogicalCond int
+
+const (
+	GenLogicalCondNa GenLogicalCond = iota
+	GenLogicalCondAnd
+	GenLogicalCondOr
+	GenLogicalCondMaxVal // [Internal] Indicates the max value for the enum. Don't use this value.
+)
+
+var GenLogicalCondNames = map[GenLogicalCond]string{
+	GenLogicalCondAnd: "and",
+	GenLogicalCondOr:  "or",
+}
+
+// -- Batch jobs priority queue --
+
+type BatchJobPriority struct {
+	ID   string    `json:"id,omitempty"`   // [mandatory] ID of the batch job.
+	SLO  time.Time `json:"slo,omitempty"`  // [mandatory] The SLO value determines the priority of the job.
+	TTL  int       `json:"ttl,omitempty"`  // [optional] TTL in seconds for the record.
+	Data []byte    `json:"data,omitempty"` // [optional] User defined data.
+}
+
+func (bj *BatchJobPriority) IsValid() error {
 	if len(bj.ID) == 0 {
 		return fmt.Errorf("ID is empty")
 	}
 	if bj.SLO.IsZero() {
 		return fmt.Errorf("SLO is zero for ID %s", bj.ID)
 	}
-	if bj.TTL <= 0 {
-		return fmt.Errorf("TTL is invalid for ID %s", bj.ID)
-	}
+	// if bj.TTL <= 0 { TBD
+	// 	return fmt.Errorf("TTL is invalid for ID %s", bj.ID)
+	// }
 	return nil
-}
-
-// BatchDBClient enables to manage batch job metadata objects in persistent storage.
-type BatchDBClient interface {
-	store.BatchClientAdmin
-
-	// Store stores a batch job metadata object.
-	// Returns the ID of the job in the database.
-	Store(ctx context.Context, job *BatchJob) (ID string, err error)
-
-	// Get gets the information (static and dynamic) of batch jobs.
-	// If IDs are specified, this function will get jobs by the specified IDs.
-	// If tags are specified, this function will get jobs by the specified tags.
-	// If no IDs nor tags are specified, the function will return an empty list of jobs.
-	// tagsLogicalCond specifies the logical condition to use for when searching for the tags per job.
-	// includeStatic specifies if to include the static part of a job in the returned output.
-	// start and limit specify the pagination details. This is relevant only for search by tags.
-	// In the first iteration with pagination specify 0 for 'start', and in any subsequent iteration specify in 'start'
-	// the value that was returned by 'cursor' in the previous iteration. The value returned by 'cursor' is an opaque integer.
-	// The value specified in 'limit' can be different between iterations, and is a recommendation only.
-	// jobs is a slice of returned jobs.
-	// cursor is an opaque integer that should be given in the next paginated call via the 'start' parameter.
-	Get(ctx context.Context, IDs []string, tags []string, tagsLogicalCond TagsLogicalCond,
-		includeStatic bool, start, limit int) (
-		jobs []*BatchJob, cursor int, err error)
-
-	// Update updates the dynamic parts of a batch job.
-	// The function will update in the job's record in the database - all the dynamic fields of the job which are not empty
-	// in the given job object.
-	// Any dynamic field that is empty in the given job object - will not be updated in the job's record in the database.
-	Update(ctx context.Context, job *BatchJob) (err error)
-
-	// Delete deletes batch jobs.
-	Delete(ctx context.Context, IDs []string) (deletedIDs []string, err error)
-}
-
-type TagsLogicalCond int
-
-const (
-	TagsLogicalCondNa TagsLogicalCond = iota
-	TagsLogicalCondAnd
-	TagsLogicalCondOr
-	TagsLogicalCondMaxVal // [Internal] Indicates the max value for the enum. Don't use this value.
-)
-
-var TagsLogicalCondNames = map[TagsLogicalCond]string{
-	TagsLogicalCondAnd: "and",
-	TagsLogicalCondOr:  "or",
-}
-
-// -- Batch jobs priority queue --
-
-type BatchJobPriority struct {
-	ID  string    // ID of the batch job.
-	SLO time.Time // The SLO value determines the priority of the job.
 }
 
 // BatchPriorityQueueClient enables to perform operations on a priority queue of jobs.
 type BatchPriorityQueueClient interface {
 	store.BatchClientAdmin
 
-	// Enqueue adds a job priority object to the queue.
-	Enqueue(ctx context.Context, jobPriority *BatchJobPriority) error
+	// PQEnqueue adds a job priority object to the queue.
+	PQEnqueue(ctx context.Context, jobPriority *BatchJobPriority) (err error)
 
-	// Dequeue returns the job priority objects at the head of the queue,
+	// PQDequeue returns the job priority objects at the head of the queue,
 	// up to the maximum number of objects specified in maxObjs.
 	// The function blocks up to the timeout value for a job priority object to be available.
 	// If the timeout value is zero, the function returns immediately.
-	Dequeue(ctx context.Context, timeout time.Duration, maxObjs int) (
+	PQDequeue(ctx context.Context, timeout time.Duration, maxObjs int) (
 		jobPriorities []*BatchJobPriority, err error)
 
-	// Remove removes jobPriority from the queue.
-	// It returns the removed job numbers.
-	// An error is returned only if the removal operation fails.
-	Remove(ctx context.Context, jobPriority *BatchJobPriority) (int, error)
+	// PQDelete deletes a job priority object from the queue.
+	// It returns the number of deleted objects.
+	// An error is returned only if the deletion operation failed.
+	PQDelete(ctx context.Context, jobPriority *BatchJobPriority) (nDeleted int, err error)
 }
 
 // -- Batch jobs events and channels --
@@ -165,14 +190,14 @@ type BatchEventsChan struct {
 type BatchEventChannelClient interface {
 	store.BatchClientAdmin
 
-	// ConsumerGetChannel gets an events channel for the job ID, to be used by a consumer to listen for events.
+	// ECConsumerGetChannel gets an events channel for the job ID, to be used by a consumer to listen for events.
 	// When the caller finishes processing a job - the caller must call the function CloseFn specified in BatchEventsChan,
 	// to close the associated resources.
-	ConsumerGetChannel(ctx context.Context, ID string) (batchEventsChan *BatchEventsChan, err error)
+	ECConsumerGetChannel(ctx context.Context, ID string) (batchEventsChan *BatchEventsChan, err error)
 
-	// ProducerSendEvents sends the specified events via associated event channels.
+	// ECProducerSendEvents sends the specified events via associated event channels.
 	// The events are sent and consumed in FIFO order.
-	ProducerSendEvents(ctx context.Context, events []BatchEvent) (sentIDs []string, err error)
+	ECProducerSendEvents(ctx context.Context, events []BatchEvent) (sentIDs []string, err error)
 }
 
 // -- Batch jobs temporary status store --
@@ -181,13 +206,13 @@ type BatchEventChannelClient interface {
 type BatchStatusClient interface {
 	store.BatchClientAdmin
 
-	// Set stores or updates status data for a job.
-	Set(ctx context.Context, ID string, TTL int, data []byte) error
+	// STSet stores or updates status data for a job.
+	StatusSet(ctx context.Context, ID string, TTL int, data []byte) (err error)
 
-	// Get retrieves the status data of a job.
+	// STGet retrieves the status data of a job.
 	// If no data exists (nil, nil) is returned.
-	Get(ctx context.Context, ID string) (data []byte, err error)
+	StatusGet(ctx context.Context, ID string) (data []byte, err error)
 
-	// Delete removes the status data for a job.
-	Delete(ctx context.Context, ID string) error
+	// STDelete deletes the status data for a job.
+	StatusDelete(ctx context.Context, ID string) (nDeleted int, err error)
 }

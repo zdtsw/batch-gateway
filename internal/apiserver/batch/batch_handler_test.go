@@ -118,11 +118,11 @@ func TestBatchHandler(t *testing.T) {
 				Failed:    0,
 			},
 		})
-		dbClient.Store(context.Background(), &api.BatchJob{
-			ID:     batchID,
-			SLO:    time.Now().UTC().Add(24 * time.Hour),
-			TTL:    86400,
-			Tags:   []string{},
+		dbClient.DBStore(context.Background(), &api.BatchItem{
+			ID: batchID,
+			// SLO:    time.Now().UTC().Add(24 * time.Hour),
+			// TTL:    86400,
+			Tags:   map[string]string{},
 			Spec:   specData,
 			Status: statusData,
 		})
@@ -173,11 +173,11 @@ func TestBatchHandler(t *testing.T) {
 					Failed:    0,
 				},
 			})
-			dbClient.Store(context.Background(), &api.BatchJob{
-				ID:     batchID,
-				SLO:    time.Now().UTC().Add(24 * time.Hour),
-				TTL:    86400,
-				Tags:   []string{},
+			dbClient.DBStore(context.Background(), &api.BatchItem{
+				ID: batchID,
+				// SLO:    time.Now().UTC().Add(24 * time.Hour),
+				// TTL:    86400,
+				Tags:   map[string]string{},
 				Spec:   specData,
 				Status: statusData,
 			})
@@ -241,11 +241,11 @@ func TestBatchHandler(t *testing.T) {
 				Failed:    0,
 			},
 		})
-		dbClient.Store(context.Background(), &api.BatchJob{
-			ID:     batchID,
-			SLO:    time.Now().UTC().Add(24 * time.Hour),
-			TTL:    86400,
-			Tags:   []string{},
+		dbClient.DBStore(context.Background(), &api.BatchItem{
+			ID: batchID,
+			// SLO:    time.Now().UTC().Add(24 * time.Hour),
+			// TTL:    86400,
+			Tags:   map[string]string{},
 			Spec:   specData,
 			Status: statusData,
 		})
@@ -318,11 +318,11 @@ func BenchmarkBatchHandler(b *testing.B) {
 				Failed:    0,
 			},
 		})
-		dbClient.Store(context.Background(), &api.BatchJob{
-			ID:     batchID,
-			SLO:    time.Now().UTC().Add(24 * time.Hour),
-			TTL:    86400,
-			Tags:   []string{},
+		dbClient.DBStore(context.Background(), &api.BatchItem{
+			ID: batchID,
+			// SLO:    time.Now().UTC().Add(24 * time.Hour),
+			// TTL:    86400,
+			Tags:   map[string]string{},
 			Spec:   specData,
 			Status: statusData,
 		})
@@ -355,11 +355,11 @@ func BenchmarkBatchHandler(b *testing.B) {
 					Failed:    0,
 				},
 			})
-			dbClient.Store(context.Background(), &api.BatchJob{
-				ID:     batchID,
-				SLO:    time.Now().UTC().Add(24 * time.Hour),
-				TTL:    86400,
-				Tags:   []string{},
+			dbClient.DBStore(context.Background(), &api.BatchItem{
+				ID: batchID,
+				// SLO:    time.Now().UTC().Add(24 * time.Hour),
+				// TTL:    86400,
+				Tags:   map[string]string{},
 				Spec:   specData,
 				Status: statusData,
 			})
@@ -395,11 +395,11 @@ func BenchmarkBatchHandler(b *testing.B) {
 					Failed:    0,
 				},
 			})
-			dbClient.Store(context.Background(), &api.BatchJob{
-				ID:     batchID,
-				SLO:    time.Now().UTC().Add(24 * time.Hour),
-				TTL:    86400,
-				Tags:   []string{},
+			dbClient.DBStore(context.Background(), &api.BatchItem{
+				ID: batchID,
+				// SLO:    time.Now().UTC().Add(24 * time.Hour),
+				// TTL:    86400,
+				Tags:   map[string]string{},
 				Spec:   specData,
 				Status: statusData,
 			})
